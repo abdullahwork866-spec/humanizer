@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Humanizer — Make AI Text Sound Human</title>
+<meta name="description" content="Paste your text and humanize it with a built-in dictionary or with AI.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #FFFBF8;
+    --panel: #ffffff;
+    --bdr: #e3ddd7;
+    --txt: #16171c;
+    --muted: #6b7280;
+    --acc: #2563eb;
+    --acc-d: #1d4ed8;
+    --ai: #7c3aed;
+    --ai-d: #6d28d9;
+    --ok: #059669;
+    --err: #dc2626;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Inter', system-ui, sans-serif; background: var(--bg); color: var(--txt); line-height: 1.5; }
+  .wrap { max-width: 1100px; margin: 0 auto; padding: 32px 20px 64px; }
+  header h1 { font-size: 28px; font-weight: 800; letter-spacing: -.02em; }
+  header p { color: var(--muted); margin-top: 4px; font-size: 15px; }
+
+  .dash { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 24px; }
+  .panel { background: var(--panel); border: 1.5px solid var(--bdr); border-radius: 14px; display: flex; flex-direction: column; overflow: hidden; }
+  .panel-head { display: flex; justify-content: space-between; align-items: center; padding: 12px 16px; border-bottom: 1px solid var(--bdr); font-weight: 700; font-size: 14px; }
+  .panel-head small { color: var(--muted); font-weight: 500; }
+  textarea { flex: 1; min-height: 340px; border: 0; outline: 0; resize: vertical; padding: 16px; font: 15px/1.6 'Inter', sans-serif; color: var(--txt); background: transparent; }
+  textarea::placeholder { color: #a39b93; }
+
+  .actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 16px; align-items: center; }
+  button { font: 700 15px 'Inter', sans-serif; border: 0; border-radius: 12px; padding: 14px 24px; cursor: pointer; color: #fff; transition: transform .1s, background .15s, opacity .15s; display: inline-flex; align-items: center; gap: 8px; }
+  button:active:not(:disabled) { transform: translateY(1px); }
+  button:disabled { opacity: .55; cursor: not-allowed; }
+  #btn-dict { background: var(--acc); }
+  #btn-dict:hover:not(:disabled) { background: var(--acc-d); }
+  #btn-ai { background: var(--ai); }
+  #btn-ai:hover:not(:disabled) { background: var(--ai-d); }
+  .ghost { background: #fff; color: var(--txt); border: 1.5px solid var(--bdr); padding: 12px 18px; font-size: 14px; }
+  .ghost:hover:not(:disabled) { border-color: #b9b0a8; }
+
+  .status { margin-top: 14px; font-size: 14px; font-weight: 600; min-height: 22px; }
+  .status.ok { color: var(--ok); }
+  .status.err { color: var(--err); }
+  .status.busy { color: var(--muted); }
+
+  .spin { width: 14px; height: 14px; border: 2.5px solid rgba(255,255,255,.4); border-top-color: #fff; border-radius: 50%; animation: sp .7s linear infinite; display: none; }
+  button.loading .spin { display: inline-block; }
+  @keyframes sp { to { transform: rotate(360deg); } }
+
+  .note { margin-top: 28px; font-size: 13px; color: var(--muted); border-top: 1px solid var(--bdr); padding-top: 16px; }
+
+  @media (max-width: 800px) {
+    .dash { grid-template-columns: 1fr; }
+    textarea { min-height: 220px; }
+    button { width: 100%; justify-content: center; }
+    .ghost { width: auto; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Humanizer</h1>
+    <p>Paste your text, then pick a method: the offline dictionary or Gemini AI.</p>
+  </header>
+
+  <div class="dash">
+    <section class="panel">
+      <div class="panel-head">Your text <small id="in-count">0 words</small></div>
+      <textarea id="input" placeholder="Paste your article or paragraph here..."></textarea>
+    </section>
+    <section class="panel">
+      <div class="panel-head">Humanized result <small id="out-count">0 words</small></div>
+      <textarea id="output" placeholder="Your humanized text will appear here..." readonly></textarea>
+    </section>
+  </div>
+
+  <div class="actions">
+    <button id="btn-dict" type="button">Humanize</button>
+    <button id="btn-ai" type="button"><span class="spin"></span><span id="ai-label">Humanize with AI</span></button>
+    <button id="btn-copy" class="ghost" type="button">Copy result</button>
+    <button id="btn-clear" class="ghost" type="button">Clear</button>
+  </div>
+  <div id="status" class="status"></div>
+
+  <p class="note"><b>Humanize</b> swaps AI-sounding words using a built-in dictionary (instant, works offline). <b>Humanize with AI</b> rewrites the text using Gemini through a secure server function, so the API key is never exposed in the browser.</p>
+</div>
+
+<script src="dictionary.js"></script>
+<script>
+(function () {
+  const $ = (id) => document.getElementById(id);
+  const input = $('input'), output = $('output'), statusEl = $('status');
+  const btnDict = $('btn-dict'), btnAi = $('btn-ai');
+  const CHUNK = 4500;
+
+  const words = (s) => (s.trim() ? s.trim().split(/\s+/).length : 0);
+  const refresh = () => {
+    $('in-count').textContent = words(input.value) + ' words';
+    $('out-count').textContent = words(output.value) + ' words';
+  };
+  const setStatus = (msg, kind) => { statusEl.textContent = msg || ''; statusEl.className = 'status ' + (kind || ''); };
+  input.addEventListener('input', refresh);
+
+  // ── Button 1: dictionary humanizer (client-side) ──
+  btnDict.addEventListener('click', () => {
+    const text = input.value;
+    if (!text.trim()) return setStatus('Please paste some text first.', 'err');
+    const r = humanizeWithDictionary(text);
+    output.value = r.text;
+    refresh();
+    setStatus(r.changes ? 'Done. ' + r.changes + ' replacements made.' : 'Done. No AI-sounding words found to replace.', 'ok');
+  });
+
+  // Split long text on paragraph boundaries so each request stays under the server limit.
+  function chunkText(text) {
+    const paras = text.split(/\n{2,}/);
+    const chunks = []; let cur = '';
+    for (const p of paras) {
+      if (p.length > CHUNK) {
+        if (cur) { chunks.push(cur); cur = ''; }
+        const sents = p.match(/[^.!?]+[.!?]*\s*/g) || [p];
+        let s2 = '';
+        for (const s of sents) {
+          if ((s2 + s).length > CHUNK) { if (s2) chunks.push(s2); s2 = s; } else s2 += s;
+        }
+        if (s2) chunks.push(s2);
+      } else if ((cur + '\n\n' + p).length > CHUNK && cur) {
+        chunks.push(cur); cur = p;
+      } else {
+        cur = cur ? cur + '\n\n' + p : p;
+      }
+    }
+    if (cur) chunks.push(cur);
+    return chunks;
+  }
+
+  // ── Button 2: AI humanizer (Netlify function → Gemini) ──
+  btnAi.addEventListener('click', async () => {
+    const text = input.value;
+    if (!text.trim()) return setStatus('Please paste some text first.', 'err');
+
+    const chunks = chunkText(text.trim());
+    btnAi.disabled = btnDict.disabled = true;
+    btnAi.classList.add('loading');
+    $('ai-label').textContent = 'Working...';
+    output.value = '';
+
+    try {
+      const parts = [];
+      for (let i = 0; i < chunks.length; i++) {
+        setStatus('Humanizing part ' + (i + 1) + ' of ' + chunks.length + '...', 'busy');
+        const res = await fetch('/api/humanize-ai', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text: chunks[i] })
+        });
+        let data = {};
+        try { data = await res.json(); } catch (e) {}
+        if (!res.ok) throw new Error(data.error || ('Request failed (' + res.status + ')'));
+        parts.push(data.text);
+        output.value = parts.join('\n\n');
+        refresh();
+      }
+      setStatus('Done. Rewritten with AI.', 'ok');
+    } catch (e) {
+      setStatus('AI error: ' + e.message, 'err');
+    } finally {
+      btnAi.disabled = btnDict.disabled = false;
+      btnAi.classList.remove('loading');
+      $('ai-label').textContent = 'Humanize with AI';
+    }
+  });
+
+  $('btn-copy').addEventListener('click', async () => {
+    if (!output.value) return setStatus('Nothing to copy yet.', 'err');
+    try { await navigator.clipboard.writeText(output.value); }
+    catch (e) { output.select(); document.execCommand('copy'); }
+    setStatus('Copied to clipboard.', 'ok');
+  });
+
+  $('btn-clear').addEventListener('click', () => {
+    input.value = output.value = '';
+    refresh(); setStatus('');
+  });
+
+  refresh();
+})();
+</script>
+</body>
+</html>
