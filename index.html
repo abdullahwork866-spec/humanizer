@@ -8,6 +8,15 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<script>
+(function () {
+  try {
+    var t = localStorage.getItem('hz-theme');
+    if (!t) t = window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    document.documentElement.setAttribute('data-theme', t);
+  } catch (e) {}
+})();
+</script>
 <style>
   :root {
     --bg: #FFFBF8;
@@ -22,10 +31,28 @@
     --ok: #059669;
     --err: #dc2626;
   }
+  :root[data-theme="dark"] {
+    --bg: #14110f;
+    --panel: #1d1a17;
+    --bdr: #37312c;
+    --txt: #f3ede8;
+    --muted: #a69d94;
+    --acc: #3b82f6;
+    --acc-d: #2563eb;
+    --ai: #8b5cf6;
+    --ai-d: #7c3aed;
+    --ok: #34d399;
+    --err: #f87171;
+  }
+  :root[data-theme="dark"] textarea::placeholder { color: #6f665e; }
+  :root[data-theme="dark"] .ghost { background: var(--panel); }
+  :root[data-theme="dark"] .ghost:hover:not(:disabled) { border-color: #5a5249; }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: 'Inter', system-ui, sans-serif; background: var(--bg); color: var(--txt); line-height: 1.5; }
   .wrap { max-width: 1100px; margin: 0 auto; padding: 32px 20px 64px; }
+  header { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; }
   header h1 { font-size: 28px; font-weight: 800; letter-spacing: -.02em; }
+  #btn-theme { width: 44px; height: 44px; padding: 0; justify-content: center; font-size: 20px; flex-shrink: 0; }
   header p { color: var(--muted); margin-top: 4px; font-size: 15px; }
 
   .dash { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 24px; }
@@ -68,8 +95,11 @@
 <body>
 <div class="wrap">
   <header>
-    <h1>Humanizer</h1>
-    <p>Paste your text, then pick a method: the offline dictionary or Gemini AI.</p>
+    <div>
+      <h1>Humanizer</h1>
+      <p>Paste your text, then pick a method: the offline dictionary or Gemini AI.</p>
+    </div>
+    <button id="btn-theme" class="ghost" type="button" aria-label="Toggle dark theme" title="Toggle dark theme">🌙</button>
   </header>
 
   <div class="dash">
@@ -158,11 +188,10 @@
       const parts = [];
       for (let i = 0; i < chunks.length; i++) {
         setStatus('Humanizing part ' + (i + 1) + ' of ' + chunks.length + '...', 'busy');
-        const res = await fetch('/api/humanize-ai', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ text: chunks[i] })
-        });
+        const payload = { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: chunks[i] }) };
+        let res = await fetch('/.netlify/functions/humanize-ai', payload);
+        if (res.status === 404) res = await fetch('/api/humanize-ai', payload);
+        if (res.status === 404) throw new Error('Function not found. Deploy via Git/Netlify CLI (not drag-and-drop) so the netlify/functions folder is included.');
         let data = {};
         try { data = await res.json(); } catch (e) {}
         if (!res.ok) throw new Error(data.error || ('Request failed (' + res.status + ')'));
@@ -186,6 +215,16 @@
     catch (e) { output.select(); document.execCommand('copy'); }
     setStatus('Copied to clipboard.', 'ok');
   });
+
+  const themeBtn = $('btn-theme');
+  const applyIcon = () => { themeBtn.textContent = document.documentElement.getAttribute('data-theme') === 'dark' ? '☀️' : '🌙'; };
+  themeBtn.addEventListener('click', () => {
+    const next = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+    document.documentElement.setAttribute('data-theme', next);
+    try { localStorage.setItem('hz-theme', next); } catch (e) {}
+    applyIcon();
+  });
+  applyIcon();
 
   $('btn-clear').addEventListener('click', () => {
     input.value = output.value = '';

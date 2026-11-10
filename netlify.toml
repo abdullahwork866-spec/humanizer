@@ -4,3 +4,9 @@
 
 [functions]
   node_bundler = "esbuild"
+
+[[redirects]]
+  from = "/api/humanize-ai"
+  to = "/.netlify/functions/humanize-ai"
+  status = 200
+  force = true
